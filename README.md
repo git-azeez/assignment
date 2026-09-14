@@ -12,7 +12,7 @@ In financial systems and regulated enterprise cloud environments, deployments mu
 
 This repository provides an end-to-end implementation of this architecture on Google Cloud Platform.
 
-## 🧒 Architecture in Plain English (The Real-World Analogies)
+## 🧒 Architecture (The Real-World Analogies)
 
 - **The Bank Teller Robot (app.py):** Imagine a robot clerk behind bulletproof bank glass. It never accepts unopened packages from strangers (zero third-party dependencies; pure Python standard library). Whenever someone asks for its identification badge (/info), it displays a laminated, tamper-proof ID card showing its exact version, build timestamp, and health status.
 - **The Master Blueprint (Terraform):** Instead of manually clicking buttons in the Google Cloud Console, we maintain an Infrastructure-as-Code blueprint. Executing terraform apply instructs Google Cloud to construct the robot's room, security permissions, and storage lockers predictably every time.
@@ -22,33 +22,33 @@ This repository provides an end-to-end implementation of this architecture on Go
 ## 🏗️ System Architecture
 
 \[ Git Push / Merge to 'main' \]  
-│  
-▼  
+            │  
+            ▼  
 \[ Cloud Build Trigger \]  
-│  
-▼  
+            │  
+            ▼  
 🛑 1. APPROVAL GATE 🛑 <── (Pending approval; consumes 0 build minutes)  
-│  
-├──► Tech Lead (roles/cloudbuild.builds.approver) reviews & approves  
-│  
-▼  
+            │  
+            ├──► Tech Lead (roles/cloudbuild.builds.approver) reviews & approves  
+            │  
+            ▼  
 \[ Dedicated CI/CD Runner \] <── (sa-cloudbuild-runner: Least Privilege)  
-│  
+        │  
 ┌───────┴───────┐  
-▼ ▼  
+▼               ▼  
 \[ Step 1: Bake \] \[ Step 2: Build \]  
 (Git SHA, UTC, (Alpine Linux,  
 Version) Non-Root UID 10001)  
-│ │  
+│               │  
 └───────┬───────┘  
-│  
-▼  
+        │  
+        ▼  
 \[ Step 3: Push Image \] ────► \[ Google Artifact Registry (build-info-repo) \]  
-│  
-▼  
+        │  
+        ▼  
 \[ Step 4: Deploy Rev \] ────► \[ Google Cloud Run v2 (build-info-api) \]  
-│  
-▼  
+        │  
+        ▼  
 \[ Service Endpoints \]  
 ├── /info (Metadata, OWASP Headers)  
 └── /health (Liveness & Startup Probes)
@@ -90,22 +90,22 @@ Version) Non-Root UID 10001)
 
 The infrastructure is defined modularly in /terraform:
 
-| **Resource**          | **Terraform Name**                                 | **Purpose**                                             |
-| --------------------- | -------------------------------------------------- | ------------------------------------------------------- |
-| **GCS Backend**       | backend "gcs"                                      | Centralized state storage with locking in az-assignment |
-| ---                   | ---                                                | ---                                                     |
+| **Resource**          | **Terraform Name**            | **Purpose**        |
+| --------------------- | ----------------------------- | ------------------ |
+| **GCS Backend**       | backend "gcs"                 | Centralized state storage with locking in az-assignment |
+| ---                   | ---                           | ---                                                     |
 | **Artifact Registry** | google_artifact_registry_repository.repo           | Private OCI image registry (build-info-repo)            |
-| ---                   | ---                                                | ---                                                     |
+| ---                   | ---                           | ---                                                     |
 | **Cloud Run v2**      | google_cloud_run_v2_service.service                | Serverless container host (build-info-api)              |
-| ---                   | ---                                                | ---                                                     |
+| ---                   | ---                           | ---                                                     |
 | **Runtime Identity**  | google_service_account.app_sa                      | Execution identity (sa-build-info-runner)               |
-| ---                   | ---                                                | ---                                                     |
+| ---                   | ---                           | ---                                                     |
 | **CI/CD Identity**    | google_service_account.cloudbuild_sa               | Gated build runner (sa-cloudbuild-runner)               |
-| ---                   | ---                                                | ---                                                     |
+| ---                   | ---                           | ---                                                     |
 | **Approval Trigger**  | google_cloudbuild_trigger.safe_deploy_trigger      | Halts commits to main until human sign-off              |
-| ---                   | ---                                                | ---                                                     |
+| ---                   | ---                           | ---                                                     |
 | **Ingress Access**    | google_cloud_run_service_iam_member.invoker_access | Access enforcement conforming to Org policies           |
-| ---                   | ---                                                | ---                                                     |
+| ---                   | ---                           | ---                                                     |
 
 ## 🚀 **Deployment & Operations Guide**
 
@@ -192,17 +192,17 @@ curl -i <https://build-info-api-642275428789.us-central1.run.app/health>
 
 ## 📋 Security & Compliance Alignment
 
-| **Objective**              | **Technical Implementation**                          | **Compliance Mapping**               |
-| -------------------------- | ----------------------------------------------------- | ------------------------------------ |
-| **Supply Chain Assurance** | Zero 3rd-party dependencies in application codebase   | SLSA Level 3 / NIST SP 800-161       |
-| ---                        | ---                                                   | ---                                  |
-| **Least Privilege Access** | Non-root container (UID 10001) & dedicated runtime SA | CIS GCP Benchmark v2.0               |
-| ---                        | ---                                                   | ---                                  |
-| **Change Dual-Control**    | Mandatory Cloud Build human approval gate on main     | SOC 2 CC8.1 / PCI-DSS v4.0 Req 6     |
-| ---                        | ---                                                   | ---                                  |
-| **Metadata Immutability**  | Git commit SHA and build timestamp baked into /app    | ISO 27001 A.12.1.2                   |
-| ---                        | ---                                                   | ---                                  |
-| **State File Integrity**   | Remote GCS backend with object versioning & locking   | HashiCorp Well-Architected Framework |
-| ---                        | ---                                                   | ---                                  |
-| **Transport Hardening**    | Enforced HSTS, strict CSP, and anti-sniff headers     | OWASP Top 10 API Security            |
-| ---                        | ---                                                   | ---                                  |
+| **Objective**              | **Implement**                                   | **Compliance Mapping**               |
+| -------------------------- | ----------------------------------------------- | ------------------------------------ |
+| **Supply Chain Assurance** | Zero 3rd-party dependencies in application      | SLSA Level 3 / NIST SP 800-161       |
+| ---                        | ---                                             | ---                                  |
+| **Least Privilege Access** | Non-root(UID 10001) & dedicated runtime SA      | CIS GCP Benchmark v2.0               |
+| ---                        | ---                                             | ---                                  |
+| **Change Dual-Control**    | Mandatory Build human approval on main          | SOC 2 CC8.1 / PCI-DSS v4.0 Req 6     |
+| ---                        | ---                                             | ---                                  |
+| **Metadata Immutability**  | Git commit SHA,build timestamp baked into /app  | ISO 27001 A.12.1.2                   |
+| ---                        | ---                                             | ---                                  |
+| **State File Integrity**   | Remote GCS backend with object locking          | HashiCorp Well-Architected Framework |
+| ---                        | ---                                             | ---                                  |
+| **Transport Hardening**    | Enforced HSTS,strict CSP,and anti-sniff headers | OWASP Top 10 API Security            |
+| ---                        | ---                                             | ---                                  |
