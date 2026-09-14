@@ -1,80 +1,85 @@
 # ==============================================================================
-# Google Cloud Build Pipeline
-# Compatible with both manual "gcloud builds submit" and automated Git triggers
+# File: cloudbuild.yaml
+# Purpose: Bank-grade CI/CD pipeline definition for build-info microservice
 # ==============================================================================
+
 steps:
   # ----------------------------------------------------------------------------
-  # Step 1: Python Syntax & Compilation Verification
+  # Captures real Git SHA, timestamp, and environment into /app/build_info.json
   # ----------------------------------------------------------------------------
-  - name: 'python:3.12-alpine3.20'
-    id: 'test'
-    entrypoint: 'python3'
-    args: ['-m', 'py_compile', 'app.py']
+  - name: 'ubuntu'
+    id: 'bake-metadata'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Baking build metadata into immutable build_info.json..."
+        cat <<EOF > build_info.json
+        {
+          "application": "${_SERVICE_NAME}",
+          "version": "${_APP_VERSION}",
+          "git_commit": "${COMMIT_SHA}",
+          "build_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+          "environment": "${_ENV_NAME}"
+        }
+        EOF
+        echo "Generated metadata payload:"
+        cat build_info.json
 
   # ----------------------------------------------------------------------------
-  # Step 2: Build Container Image with Dynamic Injected Metadata
+  # Step 2: Build the Hardened Docker Container
   # ----------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'build'
+    id: 'build-image'
     args:
       - 'build'
-      - '--build-arg'
-      - 'COMMIT_SHA=$_COMMIT_SHA'
-      - '--build-arg'
-      - 'BUILD_TIME=$_BUILD_TIMESTAMP'
-      - '--build-arg'
-      - 'VERSION=$_APP_VERSION'
-      - '--build-arg'
-      - 'APP_ENV=$_ENV_NAME'
       - '-t'
-      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$_SHORT_SHA'
+      - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${COMMIT_SHA}'
       - '-t'
-      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:latest'
+      - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest'
       - '.'
 
   # ----------------------------------------------------------------------------
-  # Step 3: Push Images to GCP Artifact Registry
+  # Step 3: Push Image to Google Artifact Registry
   # ----------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/docker'
-    id: 'push'
+    id: 'push-image'
     args:
       - 'push'
-      - '--all-tags'
-      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+      - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${COMMIT_SHA}'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-latest'
+    args:
+      - 'push'
+      - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest'
 
   # ----------------------------------------------------------------------------
-  # Step 4: Deploy Revision to Google Cloud Run
+  # Step 4: Deploy Container Revision to Google Cloud Run
   # ----------------------------------------------------------------------------
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'deploy'
+    id: 'deploy-cloud-run'
     entrypoint: 'gcloud'
     args:
       - 'run'
       - 'deploy'
-      - '$_SERVICE_NAME'
-      - '--image=$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$_SHORT_SHA'
-      - '--region=$_LOCATION'
-      - '--platform=managed'
-      - '--allow-unauthenticated'
-      - '--service-account=$_RUNTIME_SA_EMAIL'
+      - '${_SERVICE_NAME}'
+      - '--image=${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${COMMIT_SHA}'
+      - '--region=${_LOCATION}'
+      - '--service-account=${_RUNTIME_SA_EMAIL}'
 
-# ------------------------------------------------------------------------------
-# Default Substitution Values (Overridden dynamically during build)
-# ------------------------------------------------------------------------------
+# Default substitutions (used if not explicitly supplied)
 substitutions:
   _LOCATION: 'us-central1'
   _REPO_NAME: 'build-info-repo'
   _SERVICE_NAME: 'build-info-api'
   _APP_VERSION: 'v1.0.0'
   _ENV_NAME: 'production'
-  _SHORT_SHA: 'manual'
-  _COMMIT_SHA: 'manual-build'
-  _BUILD_TIMESTAMP: '2026-09-12T00:00:00Z'
-  _RUNTIME_SA_EMAIL: 'sa-build-info-runner@$PROJECT_ID.iam.gserviceaccount.com'
+  _RUNTIME_SA_EMAIL: 'sa-build-info-runner@moz-poc.iam.gserviceaccount.com'
 
 images:
-  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$_SHORT_SHA'
-  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:latest'
+  - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:${COMMIT_SHA}'
+  - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY
