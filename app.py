@@ -12,7 +12,7 @@ Security & Architectural Features:
   - Native correlation tracking via GCP 'X-Cloud-Trace-Context'.
   - Graceful Linux signal handling (SIGTERM/SIGINT) for zero-downtime draining.
   - Multi-path Health Checks: Supports public /health and internal /healthz.
-  - Dynamic Release Message: Updatable banner for client demos and verification.
+  - Dynamic Release Message: app.py has absolute authority over release_message.
 ================================================================================
 """
 
@@ -34,8 +34,8 @@ ALLOWED_ENVIRONMENTS = {"development", "staging", "production", "local"}
 MAX_URI_LENGTH = 1024  # Reject oversized malicious buffer requests
 
 # ------------------------------------------------------------------------------
-# CLIENT DEMO WHITEBOARD: Change this string whenever you want to showcase
-# a live update to your client during a release demo.
+# THE BOSS MESSAGE: Whatever string you put here WINS.
+# It will always show up in /info, overriding any cached files.
 # ------------------------------------------------------------------------------
 RELEASE_MESSAGE = os.getenv(
     "RELEASE_MESSAGE",
@@ -61,16 +61,16 @@ def write_structured_log(severity: str, message: str, **kwargs):
 
 def load_and_sanitize_build_metadata() -> dict:
     """
-    Safely loads and validates build metadata.
-    Enforces strict field boundaries so corrupt or manipulated files do not crash the service.
+    Safely loads build metadata from the container file, but ensures
+    app.py retains absolute authority over the release message.
     """
     defaults = {
         "application": "build-info-api",
-        "version": os.getenv("APP_VERSION", "v1.0.0-dev"),
+        "version": os.getenv("APP_VERSION", "v1.0.0"),
         "git_commit": os.getenv("GIT_COMMIT", "local-workspace"),
         "build_time": "local-build",
-        "environment": os.getenv("APP_ENV", "local"),
-        "release_message": RELEASE_MESSAGE
+        "environment": os.getenv("APP_ENV", "production"),
+        "release_message": RELEASE_MESSAGE[:128]
     }
 
     if not os.path.exists(BUILD_INFO_PATH):
@@ -87,14 +87,15 @@ def load_and_sanitize_build_metadata() -> dict:
         if not isinstance(raw_data, dict):
             raise ValueError("Root payload is not a valid JSON object")
 
-        # Sanitize and bound all fields to prevent arbitrary buffer injection
+        # Notice line below: release_message uses RELEASE_MESSAGE directly!
+        # The file inside the container cannot override the boss.
         sanitized = {
             "application": str(raw_data.get("application", "build-info-api"))[:64],
-            "version": str(raw_data.get("version", "unknown"))[:32],
+            "version": str(raw_data.get("version", "v1.0.0"))[:32],
             "git_commit": str(raw_data.get("git_commit", "unknown"))[:40],
             "build_time": str(raw_data.get("build_time", "unknown"))[:32],
             "environment": str(raw_data.get("environment", "production"))[:16],
-            "release_message": str(raw_data.get("release_message", RELEASE_MESSAGE))[:128]
+            "release_message": RELEASE_MESSAGE[:128]
         }
         return sanitized
 
@@ -122,7 +123,6 @@ class BankSecureHandler(BaseHTTPRequestHandler):
     def _extract_trace_context(self) -> str:
         """
         Extracts Google Cloud Trace context or generates a cryptographically secure UUID.
-        Format from GCP Load Balancer: 'X-Cloud-Trace-Context: TRACE_ID/SPAN_ID;o=TRACE_TRUE'
         """
         trace_header = self.headers.get("X-Cloud-Trace-Context")
         if trace_header:
@@ -144,7 +144,7 @@ class BankSecureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Correlation-ID", correlation_id)
 
-            # --- OWASP Recommended Financial Security Headers ---
+            # OWASP Banking Security Headers
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
@@ -189,9 +189,7 @@ class BankSecureHandler(BaseHTTPRequestHandler):
         parsed_url = urlparse(self.path)
         clean_path = parsed_url.path
 
-        # ----------------------------------------------------------------------
         # Route 1: Root Gateway Greeting
-        # ----------------------------------------------------------------------
         if clean_path == "/":
             payload = {
                 "service": "Bank Build-Info Gateway",
@@ -205,9 +203,7 @@ class BankSecureHandler(BaseHTTPRequestHandler):
             self._send_secure_response(200, "application/json; charset=utf-8", body, correlation_id)
             return
 
-        # ----------------------------------------------------------------------
         # Route 2: Core Build Info Endpoint
-        # ----------------------------------------------------------------------
         if clean_path == "/info":
             try:
                 response_payload = {
@@ -224,17 +220,13 @@ class BankSecureHandler(BaseHTTPRequestHandler):
                 self._send_json_error(500, "INTERNAL_SERVER_ERROR", "An internal error occurred. Please contact support quoting your correlation ID.", correlation_id)
                 return
 
-        # ----------------------------------------------------------------------
         # Route 3: Multi-Path Health Probe (/health, /status, /healthz)
-        # ----------------------------------------------------------------------
         if clean_path in ("/health", "/status", "/healthz"):
             body = b"OK\n"
             self._send_secure_response(200, "text/plain; charset=utf-8", body, correlation_id)
             return
 
-        # ----------------------------------------------------------------------
         # Route 4: Catch-All 404
-        # ----------------------------------------------------------------------
         write_structured_log("WARNING", f"Resource not found: {clean_path}", correlation_id=correlation_id)
         self._send_json_error(404, "RESOURCE_NOT_FOUND", "The requested resource path was not found on this service.", correlation_id)
 
