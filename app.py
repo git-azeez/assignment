@@ -39,7 +39,7 @@ MAX_URI_LENGTH = 1024  # Reject oversized malicious buffer requests
 # ------------------------------------------------------------------------------
 RELEASE_MESSAGE = os.getenv(
     "RELEASE_MESSAGE",
-    "Release 1.1.0: Real-time fraud detection engine enabled"
+    "Release 1.1.0: Real-time fraud detection engine enabled version 2"
 )
 
 
