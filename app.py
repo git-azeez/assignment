@@ -11,6 +11,7 @@ Security & Architectural Features:
   - Structured JSON Logging compliant with Google Cloud Logging / SIEM ingestion.
   - Native correlation tracking via GCP 'X-Cloud-Trace-Context'.
   - Graceful Linux signal handling (SIGTERM/SIGINT) for zero-downtime draining.
+  - Multi-path Health Checks: Supports public /health and internal /healthz.
 ================================================================================
 """
 
@@ -186,7 +187,7 @@ class BankSecureHandler(BaseHTTPRequestHandler):
                 "status": "OPERATIONAL",
                 "endpoints": {
                     "build_information": "/info",
-                    "health_probe": "/healthz"
+                    "health_probe": "/health"
                 }
             }
             body = json.dumps(payload, indent=2).encode("utf-8")
@@ -213,9 +214,11 @@ class BankSecureHandler(BaseHTTPRequestHandler):
                 return
 
         # ----------------------------------------------------------------------
-        # Route 3: Infrastructure Health Probe
+        # Route 3: Multi-Path Health Probe (/health, /status, /healthz)
+        # /health: Used by external users, monitors, and public curl commands
+        # /healthz: Retained for internal Kubernetes and container runtime probes
         # ----------------------------------------------------------------------
-        if clean_path == "/healthz":
+        if clean_path in ("/health", "/status", "/healthz"):
             body = b"OK\n"
             self._send_secure_response(200, "text/plain; charset=utf-8", body, correlation_id)
             return

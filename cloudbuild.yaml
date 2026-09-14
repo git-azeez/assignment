@@ -1,21 +1,25 @@
 # ==============================================================================
 # Google Cloud Build Pipeline
-# Injects Git metadata, creates hardened image, and deploys revision to Cloud Run
+# Compatible with both manual "gcloud builds submit" and automated Git triggers
 # ==============================================================================
 steps:
-  # 1. Syntax check
+  # ----------------------------------------------------------------------------
+  # Step 1: Python Syntax & Compilation Verification
+  # ----------------------------------------------------------------------------
   - name: 'python:3.12-alpine3.20'
     id: 'test'
     entrypoint: 'python3'
     args: ['-m', 'py_compile', 'app.py']
 
-  # 2. Build container with build-time metadata stamps
+  # ----------------------------------------------------------------------------
+  # Step 2: Build Container Image with Dynamic Injected Metadata
+  # ----------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build'
     args:
       - 'build'
       - '--build-arg'
-      - 'COMMIT_SHA=$COMMIT_SHA'
+      - 'COMMIT_SHA=$_COMMIT_SHA'
       - '--build-arg'
       - 'BUILD_TIME=$_BUILD_TIMESTAMP'
       - '--build-arg'
@@ -23,12 +27,14 @@ steps:
       - '--build-arg'
       - 'APP_ENV=$_ENV_NAME'
       - '-t'
-      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$SHORT_SHA'
+      - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$_SHORT_SHA'
       - '-t'
       - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:latest'
       - '.'
 
-  # 3. Push container to GCP Artifact Registry
+  # ----------------------------------------------------------------------------
+  # Step 3: Push Images to GCP Artifact Registry
+  # ----------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/docker'
     id: 'push'
     args:
@@ -36,7 +42,9 @@ steps:
       - '--all-tags'
       - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
 
-  # 4. Deploy revision to Google Cloud Run
+  # ----------------------------------------------------------------------------
+  # Step 4: Deploy Revision to Google Cloud Run
+  # ----------------------------------------------------------------------------
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy'
     entrypoint: 'gcloud'
@@ -44,23 +52,28 @@ steps:
       - 'run'
       - 'deploy'
       - '$_SERVICE_NAME'
-      - '--image=$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$SHORT_SHA'
+      - '--image=$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$_SHORT_SHA'
       - '--region=$_LOCATION'
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--service-account=$_RUNTIME_SA_EMAIL'
 
+# ------------------------------------------------------------------------------
+# Default Substitution Values (Overridden dynamically during build)
+# ------------------------------------------------------------------------------
 substitutions:
   _LOCATION: 'us-central1'
   _REPO_NAME: 'build-info-repo'
   _SERVICE_NAME: 'build-info-api'
   _APP_VERSION: 'v1.0.0'
   _ENV_NAME: 'production'
+  _SHORT_SHA: 'manual'
+  _COMMIT_SHA: 'manual-build'
+  _BUILD_TIMESTAMP: '2026-09-12T00:00:00Z'
   _RUNTIME_SA_EMAIL: 'sa-build-info-runner@$PROJECT_ID.iam.gserviceaccount.com'
-  _BUILD_TIMESTAMP: '2026-09-11T12:00:00Z'
 
 images:
-  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$SHORT_SHA'
+  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:$_SHORT_SHA'
   - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME:latest'
 
 options:
