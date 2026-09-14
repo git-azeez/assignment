@@ -1,6 +1,6 @@
 # ==============================================================================
 # File: terraform/variables.tf
-# Purpose: Input variables for our automated banking infrastructure stack
+# Purpose: Input variable schemas for the banking infrastructure stack
 # ==============================================================================
 
 variable "project_id" {
@@ -29,12 +29,13 @@ variable "service_name" {
 variable "github_owner" {
   type        = string
   description = "Your personal GitHub username or organization name"
+  default     = "git-azeez"
 }
 
 variable "github_repo_name" {
   type        = string
-  description = "The GitHub repository name (e.g., gcp-build-info-service)"
-  default     = "gcp-build-info-service"
+  description = "The GitHub repository name"
+  default     = "assignment"
 }
 
 variable "approver_email" {

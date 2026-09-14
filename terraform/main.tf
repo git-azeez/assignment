@@ -1,5 +1,6 @@
 # ==============================================================================
 # File: terraform/main.tf
+# Purpose: Enterprise banking microservice infrastructure with approval gate
 # ==============================================================================
 
 terraform {
@@ -10,9 +11,13 @@ terraform {
       version = "~> 5.30"
     }
   }
+
+  # ----------------------------------------------------------------------------
+  # Remote State Storage in Google Cloud Storage (The Shared Lockbox)
+  # ----------------------------------------------------------------------------
   backend "gcs" {
-    bucket  = "az-assignment"
-    prefix  = "terraform/state"
+    bucket = "az-assignment"
+    prefix = "terraform/state"
   }
 }
 
@@ -21,13 +26,17 @@ provider "google" {
   region  = var.region
 }
 
+# ------------------------------------------------------------------------------
+# 1. Project Information Lookup
+# ------------------------------------------------------------------------------
 data "google_project" "project" {}
 
 # ------------------------------------------------------------------------------
-# 1. Enable Required Google Cloud Services
+# 2. Enable Required Google Cloud Service APIs
 # ------------------------------------------------------------------------------
 resource "google_project_service" "apis" {
   for_each = toset([
+    "cloudresourcemanager.googleapis.com",
     "run.googleapis.com",
     "cloudbuild.googleapis.com",
     "artifactregistry.googleapis.com",
@@ -38,7 +47,7 @@ resource "google_project_service" "apis" {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Google Artifact Registry (Secure Container Locker)
+# 3. Artifact Registry (Secure Container Locker)
 # ------------------------------------------------------------------------------
 resource "google_artifact_registry_repository" "repo" {
   depends_on    = [google_project_service.apis]
@@ -49,7 +58,7 @@ resource "google_artifact_registry_repository" "repo" {
 }
 
 # ------------------------------------------------------------------------------
-# 3. Dedicated Least-Privilege Runtime Service Account for Cloud Run
+# 4. Runtime Service Account for Cloud Run (The Bank Teller)
 # ------------------------------------------------------------------------------
 resource "google_service_account" "app_sa" {
   account_id   = "sa-build-info-runner"
@@ -57,31 +66,52 @@ resource "google_service_account" "app_sa" {
 }
 
 # ------------------------------------------------------------------------------
-# 4. IAM Permissions for the Cloud Build Factory Worker
+# 5. Dedicated CI/CD Service Account for Cloud Build (Required for Approvals)
 # ------------------------------------------------------------------------------
-# Allow Cloud Build to manage Cloud Run deployments
+resource "google_service_account" "cloudbuild_sa" {
+  account_id   = "sa-cloudbuild-runner"
+  display_name = "Dedicated Cloud Build CI/CD Service Account"
+}
+
+# Grant Cloud Build SA permission to build and log
+resource "google_project_iam_member" "cloudbuild_builder" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+# Grant Cloud Build SA permission to push images into Artifact Registry
+resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.repo.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+# Grant Cloud Build SA permission to deploy revisions to Cloud Run
 resource "google_project_iam_member" "cloudbuild_run_admin" {
   project = var.project_id
   role    = "roles/run.admin"
-  member  = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }
 
-# Allow Cloud Build to act as the runtime service account
+# Grant Cloud Build SA permission to assign the runtime SA to Cloud Run
 resource "google_service_account_iam_member" "cloudbuild_actas" {
   service_account_id = google_service_account.app_sa.name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  member             = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }
 
-# Grant the Golden Key (Approver role) to the designated human approver
+# Designated Human Approver Role
 resource "google_project_iam_member" "human_approver" {
   project = var.project_id
-  role    = "roles/cloudbuild.approver"
+  role    = "roles/cloudbuild.builds.approver"
   member  = "user:${var.approver_email}"
 }
 
 # ------------------------------------------------------------------------------
-# 5. Cloud Run Service (v2 Serverless Container)
+# 6. Cloud Run Service (v2 Serverless Container)
 # ------------------------------------------------------------------------------
 resource "google_cloud_run_v2_service" "service" {
   name     = var.service_name
@@ -92,12 +122,11 @@ resource "google_cloud_run_v2_service" "service" {
     service_account = google_service_account.app_sa.email
 
     scaling {
-      min_instance_count = 0 # Scale to zero when idle ($0 cost)
-      max_instance_count = 3 # Hard ceiling against traffic spikes
+      min_instance_count = 0
+      max_instance_count = 3
     }
 
     containers {
-      # Standard placeholder image; Cloud Build updates this upon approved commit
       image = "us-docker.pkg.dev/cloudrun/container/hello:latest"
 
       resources {
@@ -133,32 +162,44 @@ resource "google_cloud_run_v2_service" "service" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      client,
+      client_version
+    ]
+  }
+
   depends_on = [google_project_service.apis]
 }
 
 # ------------------------------------------------------------------------------
-# 6. Public Access Policy (Allow unauthenticated clients to read endpoints)
+# 7. Ingress Access Policy (Complies with Organization Security Policies)
 # ------------------------------------------------------------------------------
-resource "google_cloud_run_service_iam_member" "public_access" {
+resource "google_cloud_run_service_iam_member" "invoker_access" {
   location = google_cloud_run_v2_service.service.location
   service  = google_cloud_run_v2_service.service.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  member   = "user:${var.approver_email}"
 }
 
 # ------------------------------------------------------------------------------
-# 7. Cloud Build Trigger with Mandatory Human Approval Gate
+# 8. Cloud Build Trigger with Mandatory Human Approval Gate (1st Gen)
 # ------------------------------------------------------------------------------
 resource "google_cloudbuild_trigger" "safe_deploy_trigger" {
   name        = "auto-deploy-on-push-to-main"
   description = "Triggered on main branch push; halts and waits for human approval."
   location    = "global"
 
-  # The Safety Stop Sign: build stays in PENDING_APPROVAL until approved
+  # Explicit Service Account: Mandatory for approval-gated triggers!
+  service_account = google_service_account.cloudbuild_sa.id
+
+  # The Safety Stop Sign
   approval_config {
     approval_required = true
   }
 
+  # 1st-Gen GitHub connection block
   github {
     owner = var.github_owner
     name  = var.github_repo_name
@@ -170,16 +211,18 @@ resource "google_cloudbuild_trigger" "safe_deploy_trigger" {
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _LOCATION       = var.region
-    _REPO_NAME      = var.repository_name
-    _SERVICE_NAME   = var.service_name
-    _APP_VERSION    = "v1.0.0"
-    _ENV_NAME       = "production"
+    _LOCATION         = var.region
+    _REPO_NAME        = var.repository_name
+    _SERVICE_NAME     = var.service_name
+    _APP_VERSION      = "v1.0.0"
+    _ENV_NAME         = "production"
     _RUNTIME_SA_EMAIL = google_service_account.app_sa.email
   }
 
   depends_on = [
     google_artifact_registry_repository.repo,
+    google_project_iam_member.cloudbuild_builder,
+    google_artifact_registry_repository_iam_member.cloudbuild_writer,
     google_project_iam_member.cloudbuild_run_admin,
     google_service_account_iam_member.cloudbuild_actas,
     google_project_iam_member.human_approver
