@@ -16,7 +16,7 @@ This repository provides an end-to-end implementation of this architecture on Go
 
 - **The Bank Teller Robot (app.py):** Imagine a robot clerk behind bulletproof bank glass. It never accepts unopened packages from strangers (zero third-party dependencies; pure Python standard library). Whenever someone asks for its identification badge (/info), it displays a laminated, tamper-proof ID card showing its exact version, build timestamp, and health status.
 - **The Master Blueprint (Terraform):** Instead of manually clicking buttons in the Google Cloud Console, we maintain an Infrastructure-as-Code blueprint. Executing terraform apply instructs Google Cloud to construct the robot's room, security permissions, and storage lockers predictably every time.
-- **The Cloud Lockbox (GCS Remote Backend):** Keeping your blueprint only on a local laptop risks state loss or desynchronization. We store the state file in a version-controlled Google Cloud Storage bucket (az-assignment) with state locking, ensuring all team members operate from the same state.
+- **The Cloud Lockbox (GCS Remote Backend):** Keeping  blueprint only on a local laptop risks state loss or desynchronization. We store the state file in a version-controlled Google Cloud Storage bucket (az-assignment) with state locking, ensuring all team members operate from the same state.
 - **The Inspection Lock (Cloud Build Approval Gate):** When code is merged into main, the assembly line does not push directly to production. It sounds a chime, halts execution with a blue **Pending approval** badge, and waits without consuming compute minutes until an authorized manager turns the approval key.
 
 ## 🏗️ System Architecture
@@ -147,7 +147,7 @@ terraform import google_cloud_run_v2_service.service projects/moz-poc/locations/
 
 ### Step 1: Bump Version or Release Message
 
-Update the release state in your workspace:
+Update the release state in  workspace:
 
 cd ~/az  
 <br/>\# 1. Bump the release version  
